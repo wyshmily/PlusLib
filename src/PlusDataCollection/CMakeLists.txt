@@ -619,7 +619,6 @@ IF(PLUS_USE_BLACKMAGIC_DECKLINK)
     )
 ENDIF()
 
-message(STATUS "  MWCapture_Include_Dir: ${MWCapture_INCLUDE_DIR}")
 #--------------------------------------------------------------------------
 # Magewell MWCapture support
 IF(PLUS_USE_MAGEWELL_MWCAPTURE)
@@ -634,12 +633,6 @@ IF(PLUS_USE_MAGEWELL_MWCAPTURE)
     Magewell/MWCaptureAPIWrapper.cxx
     )
 
-  IF(UNIX)
-    LIST(APPEND MagewellMWCapture_SRCS
-      ${MWCAPTRE_INCLUDE_DIR}/DeckLinkAPIDispatch.cpp
-      )
-  ENDIF()
-
   LIST(APPEND ${PROJECT_NAME}_HDRS
     ${MagewellMWCapture_HDRS}
     )
@@ -648,9 +641,10 @@ IF(PLUS_USE_MAGEWELL_MWCAPTURE)
     ${MagewellMWCapture_SRCS}
     )
 
-  LIST(APPEND ${PROJECT_NAME}_LIBS
-    MWCapture
-    )
+  # LIST(APPEND ${PROJECT_NAME}_LIBS
+  #   MWCapture
+  #   )
+  target_link_libraries(${PROJECT_NAME} PRIVATE MWCapture)
 ENDIF()
 
 #--------------------------------------------------------------------------
@@ -2807,14 +2801,14 @@ IF(PLUS_USE_BLACKMAGIC_DECKLINK)
   LIST(APPEND BlackMagicDeckLink_SRCS ${MIDL_OUTPUT})
 ENDIF()
 
-IF(PLUS_USE_MAGEWELL_MWCAPTURE)
-  #MWCaptureGenerateAPIFiles(vtk${PROJECT_NAME})
-  target_sources(vtk${PROJECT_NAME} PRIVATE ${MIDL_OUTPUT})
-  # target_link_libraries(vtk${PROJECT_NAME} PRIVATE MWCapture)
-  LIST(APPEND MagewellMWCapture_SRCS ${MIDL_OUTPUT})
-  LIST(APPEND External_Libraries_Install  ${MWCapture_LIBRARY_RELEASE})
-  LIST(APPEND External_Libraries_Debug  ${MWCapture_LIBRARY_DEBUG})
-ENDIF()
+# IF(PLUS_USE_MAGEWELL_MWCAPTURE)
+#   #MWCaptureGenerateAPIFiles(vtk${PROJECT_NAME})
+#   target_sources(vtk${PROJECT_NAME} PRIVATE ${MIDL_OUTPUT})
+#   # target_link_libraries(vtk${PROJECT_NAME} PRIVATE MWCapture)
+#   LIST(APPEND MagewellMWCapture_SRCS ${MIDL_OUTPUT})
+#   LIST(APPEND External_Libraries_Install  ${MWCapture_LIBRARY_RELEASE})
+#   LIST(APPEND External_Libraries_Debug  ${MWCapture_LIBRARY_DEBUG})
+# ENDIF()
 
 # --------------------------------------------------------------------------
 # Source groups
