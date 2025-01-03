@@ -10,10 +10,10 @@ See License.txt for details.
 #include "vtkPlusDataCollectionExport.h"
 #include "vtkPlusDevice.h"
 
-// DeckLink includes
+// MWCapture includes
 #if WIN32
   // Windows includes
-  #include <comutil.h>
+#include <comutil.h>
 #endif
 #include <DeckLinkAPI.h>
 
@@ -21,53 +21,53 @@ See License.txt for details.
 #include <atomic>
 
 /*!
-\class vtkPlusDeckLinkVideoSource
-\brief Interface to a BlackMagic DeckLink capture card
+\class vtkPlusMWCaptureVideoSource
+\brief Interface to a BlackMagic MWCapture capture card
 \ingroup PlusLibDataCollection
 */
-class vtkPlusDataCollectionExport vtkPlusMWCaptureVideoSource : public vtkPlusDevice//, public IDeckLinkInputCallback
+class vtkPlusDataCollectionExport vtkPlusMWCaptureVideoSource : public vtkPlusDevice, public IDeckLinkInputCallback
 {
 public:
-  static vtkPlusMWCaptureVideoSource* New();
-  vtkTypeMacro(vtkPlusMWCaptureVideoSource, vtkPlusDevice);
-  void PrintSelf(ostream& os, vtkIndent indent);
+    static vtkPlusMWCaptureVideoSource* New();
+    vtkTypeMacro(vtkPlusMWCaptureVideoSource, vtkPlusDevice);
+    void PrintSelf(ostream& os, vtkIndent indent);
 
-  /* Device is a hardware tracker. */
-  virtual bool IsTracker() const;
-  virtual bool IsVirtual() const;
+    /* Device is a hardware tracker. */
+    virtual bool IsTracker() const;
+    virtual bool IsVirtual() const;
 
-  virtual PlusStatus ReadConfiguration(vtkXMLDataElement* config);
-  virtual PlusStatus WriteConfiguration(vtkXMLDataElement* config);
-  virtual PlusStatus InternalConnect();
-  virtual PlusStatus InternalDisconnect();
-  virtual PlusStatus InternalStartRecording();
-  virtual PlusStatus InternalStopRecording();
-  virtual PlusStatus Probe();
-  virtual PlusStatus NotifyConfigured();
-
-protected:
-  vtkPlusDeckLinkVideoSource();
-  ~vtkPlusDeckLinkVideoSource();
+    virtual PlusStatus ReadConfiguration(vtkXMLDataElement* config);
+    virtual PlusStatus WriteConfiguration(vtkXMLDataElement* config);
+    virtual PlusStatus InternalConnect();
+    virtual PlusStatus InternalDisconnect();
+    virtual PlusStatus InternalStartRecording();
+    virtual PlusStatus InternalStopRecording();
+    virtual PlusStatus Probe();
+    virtual PlusStatus NotifyConfigured();
 
 protected:
-  // IDeckLinkInputCallback interface
-  virtual HRESULT STDMETHODCALLTYPE VideoInputFormatChanged(BMDVideoInputFormatChangedEvents notificationEvents, IDeckLinkDisplayMode* newDisplayMode, BMDDetectedVideoInputFormatFlags detectedSignalFlags);
-  virtual HRESULT STDMETHODCALLTYPE VideoInputFrameArrived(IDeckLinkVideoInputFrame* videoFrame, IDeckLinkAudioInputPacket* audioPacket);
-
-  // IUnknown interface
-  virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, LPVOID* ppv);
-  virtual ULONG STDMETHODCALLTYPE AddRef();
-  virtual ULONG STDMETHODCALLTYPE Release();
+    vtkPlusMWCaptureVideoSource();
+    ~vtkPlusMWCaptureVideoSource();
 
 protected:
-  std::atomic<ULONG> ReferenceCount;
+    // IMWCaptureInputCallback interface
+    virtual HRESULT STDMETHODCALLTYPE VideoInputFormatChanged(BMDVideoInputFormatChangedEvents notificationEvents, IDeckLinkDisplayMode* newDisplayMode, BMDDetectedVideoInputFormatFlags detectedSignalFlags);
+    virtual HRESULT STDMETHODCALLTYPE VideoInputFrameArrived(IDeckLinkVideoInputFrame* videoFrame, IDeckLinkAudioInputPacket* audioPacket);
+
+    // IUnknown interface
+    virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, LPVOID* ppv);
+    virtual ULONG STDMETHODCALLTYPE AddRef();
+    virtual ULONG STDMETHODCALLTYPE Release();
+
+protected:
+    std::atomic<ULONG> ReferenceCount;
 
 private:
-  vtkPlusMWCaptureVideoSource(const vtkPlusMWCaptureVideoSource&); // Not implemented
-  void operator=(const vtkPlusMWCaptureVideoSource&); // Not implemented
+    vtkPlusMWCaptureVideoSource(const vtkPlusMWCaptureVideoSource&); // Not implemented
+    void operator=(const vtkPlusMWCaptureVideoSource&); // Not implemented
 
-  class vtkInternal;
-  vtkInternal* Internal;
+    class vtkInternal;
+    vtkInternal* Internal;
 
 };
 
