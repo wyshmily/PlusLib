@@ -628,7 +628,6 @@ IF(PLUS_USE_MAGEWELL_MWCAPTURE)
     Magewell/vtkPlusMWCaptureVideoSource.h
     Magewell/DeckLinkAPIWrapper.h
     Magewell/PlusOutputVideoFrame.h
-    ${MWCAPTRE_INCLUDE_DIR}/ProductVer.h
   )
 
   SET(MagewellMWCapture_SRCS
