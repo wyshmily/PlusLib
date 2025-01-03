@@ -644,16 +644,15 @@ IF(PLUS_USE_MAGEWELL_MWCAPTURE)
   # LIST(APPEND ${PROJECT_NAME}_LIBS
   #   MWCapture
   #   )
-  LIST(APPEND ${PROJECT_NAME}_INCLUDE_DIRS  ${MWCapture_INCLUDE_DIRS})
  
+  LIST(APPEND ${PROJECT_NAME}_INCLUDE_DIRS  ${MWCapture_INCLUDE_DIRS})
+
   get_target_property(_lib_release MWCapture IMPORTED_LOCATION)
   get_target_property(_lib_debug MWCapture  IMPORTED_LOCATION_DEBUG)
   LIST(APPEND ${PROJECT_NAME}_LIBS
-  MWCapture
     optimized ${_lib_release}
     debug ${_lib_debug}
   )
-  target_link_libraries(${PROJECT_NAME} PRIVATE MWCapture)
 ENDIF()
 
 #--------------------------------------------------------------------------
