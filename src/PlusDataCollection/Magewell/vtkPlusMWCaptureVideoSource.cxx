@@ -7,8 +7,6 @@ See License.txt for details.
 #include "PlusConfigure.h"
 
 // Local includes
-#include "PlusOutputVideoFrame.h"
-#include "vtkIGSIOAccurateTimer.h"
 #include "vtkPlusDataSource.h"
 #include "vtkPlusMWCaptureVideoSource.h"
 #include <PixelCodec.h>
@@ -23,7 +21,8 @@ See License.txt for details.
 #include <string>
 
 // MWCapture SDK includes
-#include "DeckLinkAPIWrapper.h"
+#include <MWCapture.h>
+#include "MWCaptureAPIWrapper.h"
 
 //----------------------------------------------------------------------------
 // vtkPlusMWCaptureVideoSource::vtkInternal
@@ -44,25 +43,20 @@ public:
 
     virtual ~vtkInternal() {}
 
-    int                       DeviceIndex = -1;
-    bool                      PreviousFrameValid = false;
-    std::string               DeviceName = "";
     FrameSizeType             RequestedFrameSize = { 1920, 1080, 1 };
-    BMDPixelFormat            RequestedPixelFormat = bmdFormatUnspecified;
-    BMDVideoConnection        RequestedVideoConnection = bmdVideoConnectionUnspecified;
-    BMDDisplayMode            RequestedDisplayMode = bmdModeUnknown;
+    std::string               RequestedPixelFormatName = "YUY2";
+    int                       RequestedPixelFormat = MWFOURCC_YUY2;
+    std::string               RequestedDeviceFamily = "USB Capture";
+    int DeviceIndex = -1;
+    std::string DeviceName = "";
 
-    IDeckLink* MWCapture = nullptr;
-    IDeckLinkInput* MWCaptureInput = nullptr;
-    IDeckLinkDisplayMode* MWCaptureDisplayMode = nullptr;
-    IDeckLinkVideoConversion* MWCaptureVideoConversion = nullptr;
-
-    PlusOutputVideoFrame* OutputFrame = nullptr;
+    int MWChannelIndex = -1;
+    HCHANNEL MWChannelHandle = nullptr;
+    HANDLE MWVideoCaptureHandle = nullptr;
+    MWCAP_VIDEO_SIGNAL_STATUS* MWInputSignalStatus = nullptr;
 
     unsigned char* RGBBytes = nullptr;
     unsigned char* GrayBytes = nullptr;
-
-    std::atomic_bool          COMInitialized = false;
 
 private:
     static vtkPlusMWCaptureVideoSource::vtkInternal* New();
@@ -139,24 +133,16 @@ vtkPlusMWCaptureVideoSource::~vtkPlusMWCaptureVideoSource()
 {
     LOG_TRACE("vtkPlusMWCaptureVideoSource::~vtkPlusMWCaptureVideoSource()");
 
-    if (this->Internal->MWCaptureDisplayMode != nullptr)
-    {
-        this->Internal->MWCaptureDisplayMode->Release();
+    if (this->Internal->MWInputSignalStatus != nullptr) {
+        delete this->Internal->MWInputSignalStatus;
+        this->Internal->MWInputSignalStatus = nullptr;
     }
-    if (this->Internal->MWCaptureInput != nullptr)
-    {
-        this->Internal->MWCaptureInput->Release();
-    }
-    if (this->Internal->MWCapture != nullptr)
-    {
-        this->Internal->MWCapture->Release();
-    }
-
-    ShutdownCOM(this->Internal->COMInitialized);
 
     this->Internal->Delete();
     this->Internal = nullptr;
 }
+
+
 
 //----------------------------------------------------------------------------
 HRESULT STDMETHODCALLTYPE vtkPlusMWCaptureVideoSource::QueryInterface(REFIID iid, LPVOID* ppv)
@@ -175,12 +161,6 @@ HRESULT STDMETHODCALLTYPE vtkPlusMWCaptureVideoSource::QueryInterface(REFIID iid
     if (iid == IID_IUnknown)
     {
         *ppv = this;
-        AddRef();
-        result = S_OK;
-    }
-    else if (iid == IID_IDeckLinkInputCallback)
-    {
-        *ppv = (IDeckLinkInputCallback*)this;
         AddRef();
         result = S_OK;
     }
@@ -265,34 +245,11 @@ PlusStatus vtkPlusMWCaptureVideoSource::ReadConfiguration(vtkXMLDataElement* roo
     XML_READ_STRING_ATTRIBUTE_NONMEMBER_OPTIONAL(PixelFormat, pixelFormat, deviceConfig);
     if (!pixelFormat.empty())
     {
+        //this->Internal->RequestedPixelFormat = DeckLinkAPIWrapper::PixelFormatFromString(pixelFormat);
         this->Internal->RequestedPixelFormat = DeckLinkAPIWrapper::PixelFormatFromString(pixelFormat);
-        if (this->Internal->RequestedPixelFormat == bmdFormatUnspecified)
+        if (this->Internal->RequestedPixelFormat == MWFOURCC_UNK)
         {
             LOG_ERROR("Unknown pixel format requested. Please see device page documentation for supported pixel formats.");
-            return PLUS_FAIL;
-        }
-    }
-
-    std::string videoConnection("");
-    XML_READ_STRING_ATTRIBUTE_NONMEMBER_OPTIONAL(VideoConnection, videoConnection, deviceConfig);
-    if (!videoConnection.empty())
-    {
-        this->Internal->RequestedVideoConnection = DeckLinkAPIWrapper::VideoConnectionFromString(videoConnection);
-        if (this->Internal->RequestedVideoConnection == bmdVideoConnectionUnspecified)
-        {
-            LOG_ERROR("Unknown connection type requested. Please see device page documentation for supported connections.");
-            return PLUS_FAIL;
-        }
-    }
-
-    std::string displayMode("");
-    XML_READ_STRING_ATTRIBUTE_NONMEMBER_OPTIONAL(DisplayMode, displayMode, deviceConfig);
-    if (!displayMode.empty())
-    {
-        this->Internal->RequestedDisplayMode = DeckLinkAPIWrapper::DisplayModeFromString(displayMode);
-        if (this->Internal->RequestedDisplayMode == bmdModeUnknown)
-        {
-            LOG_ERROR("Unable to recognize requested display mode. Please see device documentation for valid entries.");
             return PLUS_FAIL;
         }
     }
@@ -313,113 +270,113 @@ PlusStatus vtkPlusMWCaptureVideoSource::InternalConnect()
 {
     LOG_TRACE("vtkPlusMWCaptureVideoSource::InternalConnect");
 
-    IDeckLink* deckLink(nullptr);
-    IDeckLinkIterator* deckLinkIterator(nullptr);
-    IDeckLinkInput* deckLinkInput(nullptr);
-    IDeckLinkDisplayModeIterator* deckLinkDisplayModeIterator(nullptr);
-    IDeckLinkDisplayMode* deckLinkDisplayMode(nullptr);
-    HRESULT result;
-
-    if (!InitCOM(this->Internal->COMInitialized))
-    {
+    if (!MWCaptureInitInstance()) {
+        LOG_TRACE("failed to init MWCapture SDK");
         goto out;
     }
 
-    this->Internal->MWCaptureVideoConversion = DeckLinkAPIWrapper::CreateVideoConversion();
+    if (MW_RESULT::MW_SUCCEEDED != MWRefreshDevice()) {
+        LOG_TRACE("failed to scan MWCapture devices");
+        goto out;
+    }
 
-    deckLinkIterator = DeckLinkAPIWrapper::CreateDeckLinkIterator();
+    int channelCount = MWGetChannelCount();
+    if (channelCount == 0) {
+        LOG_TRACE("no MWCapture device found");
+        goto out;
+    }
 
-    // Enumerate all cards in this system
+    MWCAP_CHANNEL_INFO channelInfo;
+    MW_RESULT rt = MW_RESULT::MW_FAILED;
     int count = 0;
-    while (deckLinkIterator->Next(&deckLink) == S_OK)
-    {
+    for (int channelIndex = 0; channelIndex < channelCount; channelIndex++) {
+
         if (this->Internal->DeviceIndex == -1 || count == this->Internal->DeviceIndex)
         {
-            // Query the MWCapture for its input interface
-            result = deckLink->QueryInterface(IID_IDeckLinkInput, (void**)&deckLinkInput);
-            if (result != S_OK)
+            rt = MWGetChannelInfoByIndex(channelIndex, &channelInfo);
+            if (rt != MW_RESULT::MW_SUCCEEDED)
             {
-                LOG_ERROR("Could not obtain the IMWCaptureInput interface - result = " << std::hex << std::setw(8) << std::setfill('0') << result);
+                LOG_ERROR("Could not obtain the MWCAP_CHANNEL_INFO - result = " << std::hex << std::setw(8) << std::setfill('0') << rt);
                 goto out;
             }
 
-            if (deckLinkInput->GetDisplayModeIterator(&deckLinkDisplayModeIterator) != S_OK)
-            {
-                LOG_ERROR("Unable to iterate display modes. Cannot select input display mode.");
-                return PLUS_FAIL;
-            }
+            // first match the requested device family by name
+            if (this->Internal->RequestedDeviceFamily._Equal(channelInfo.szFamilyName)) {
 
-            while (deckLinkDisplayModeIterator->Next(&deckLinkDisplayMode) == S_OK)
-            {
-                if (this->Internal->RequestedDisplayMode != bmdModeUnknown && deckLinkDisplayMode->GetDisplayMode() == this->Internal->RequestedDisplayMode)
-                {
-                    BOOL supported;
-                    BMDDisplayMode actualMode;
-                    if (deckLinkInput->DoesSupportVideoMode(this->Internal->RequestedVideoConnection, this->Internal->RequestedDisplayMode, this->Internal->RequestedPixelFormat, BMDVideoInputConversionMode::bmdNoVideoInputConversion, bmdSupportedVideoModeDefault, &actualMode, &supported) == S_OK && supported)
-                    {
-                        // Found by display mode
-                        this->Internal->MWCapture = deckLink;
-                        this->Internal->MWCaptureInput = deckLinkInput;
-                        this->Internal->MWCaptureDisplayMode = deckLinkDisplayMode;
-                        goto out;
-                    }
+                // then match the requested pixel format and frame size
+                WCHAR path[128] = { 0 };
+                MWGetDevicePath(channelIndex, path);
+                HCHANNEL channelHandle = MWOpenChannelByPath(path);
+                if (NULL == channelHandle) {
+                    LOG_ERROR("failed to open channel - channel index = " << channelIndex);
+                    goto out;
                 }
-                else if (this->Internal->RequestedDisplayMode == bmdModeUnknown)
-                {
-                    BMDTimeValue frameDuration;
-                    BMDTimeScale timeScale;
-                    if (deckLinkDisplayMode->GetFrameRate(&frameDuration, &timeScale) != S_OK)
-                    {
-                        LOG_WARNING("Unable to retrieve frame rate for display mode. Skipping.");
-                        continue;
-                    }
 
-                    double frameRate = (double)timeScale / (double)frameDuration;
-                    if (deckLinkDisplayMode->GetWidth() == this->Internal->RequestedFrameSize[0] &&
-                        deckLinkDisplayMode->GetHeight() == this->Internal->RequestedFrameSize[1] &&
-                        AreSame(frameRate, this->AcquisitionRate))
-                    {
-                        BOOL supported;
-                        BMDDisplayMode actualMode;
-                        if (deckLinkInput->DoesSupportVideoMode(this->Internal->RequestedVideoConnection, this->Internal->RequestedDisplayMode, this->Internal->RequestedPixelFormat, BMDVideoInputConversionMode::bmdNoVideoInputConversion, bmdSupportedVideoModeDefault, &actualMode, &supported) == S_OK && supported)
+                int formatCount = 0;
+                if (!MWGetVideoCaptureSupportFormat(channelHandle, NULL, &formatCount)) {
+                    LOG_ERROR("failed to get MWCapture channel support format count - channel index = " << channelIndex);
+                    goto out;
+                }
+
+                VIDEO_FORMAT_INFO* p_format = (VIDEO_FORMAT_INFO*)malloc(count * sizeof(VIDEO_FORMAT_INFO));
+
+                if (!MWGetVideoCaptureSupportFormat(channelHandle, p_format, &formatCount)) {
+                    if (p_format) {
+                        free(p_format);
+                    }
+                    LOG_ERROR("failed to get MWCapture channel support formats - channel index = " << channelIndex);
+                    goto out;
+                }
+
+                for (int i = 0; i < formatCount; i++) {
+                    if (this->Internal->RequestedPixelFormatName._Equal(p_format[i].colorSpace)
+                        && this->Internal->RequestedFrameSize[0] == p_format[i].cx
+                        && this->Internal->RequestedFrameSize[1] == p_format[i].cy) {
+
+                        // check signal staus
+                        MWCAP_VIDEO_SIGNAL_STATUS* signalStatus = new MWCAP_VIDEO_SIGNAL_STATUS;
+                        MWGetVideoSignalStatus(channelHandle, signalStatus);
+                        switch (signalStatus->state)
                         {
-                            // Found by frame details
-                            this->Internal->MWCapture = deckLink;
-                            this->Internal->MWCaptureInput = deckLinkInput;
-                            this->Internal->MWCaptureDisplayMode = deckLinkDisplayMode;
-                            goto out;
+                        case MWCAP_VIDEO_SIGNAL_NONE:
+                            LOG_INFO("Input signal status: NONE - channel index = " << channelIndex);
+                            break;
+                        case MWCAP_VIDEO_SIGNAL_UNSUPPORTED:
+                            LOG_INFO("Input signal status: Unsupported - channel index = " << channelIndex);
+                            break;
+                        case MWCAP_VIDEO_SIGNAL_LOCKING:
+                            LOG_INFO("Input signal status: Locking - channel index = " << channelIndex);
+                            break;
+                        case MWCAP_VIDEO_SIGNAL_LOCKED:
+                            LOG_INFO("Input signal status: Locked - channel index = " << channelIndex);
+                            break;
+                        }
+
+                        if (signalStatus->state == MWCAP_VIDEO_SIGNAL_LOCKED) {
+                            this->Internal->MWChannelIndex = channelIndex;
+                            this->Internal->MWChannelHandle = channelHandle;
+                            this->Internal->MWInputSignalStatus = signalStatus;
+                            break;
+                        }
+                        else {
+                            delete signalStatus;
                         }
                     }
                 }
-                deckLinkDisplayMode->Release();
+
+                free(p_format);
+
+                if (this->Internal->MWChannelHandle) {
+                    goto out;
+                }
             }
-
-            deckLinkDisplayModeIterator->Release();
-            deckLinkInput->Release();
-            deckLink->Release();
         }
-
-        count++;
     }
-
     LOG_ERROR("Unable to locate requested capture parameters.")
 
         out:
-    if (deckLinkDisplayModeIterator)
+    if (this->Internal->MWInputSignalStatus)
     {
-        deckLinkDisplayModeIterator->Release();
-    }
-    if (deckLinkIterator)
-    {
-        deckLinkIterator->Release();
-    }
-
-    if (this->Internal->MWCaptureInput)
-    {
-        // Confirm data source is correctly configured. If not, abort
-        BMDTimeValue frameDuration;
-        BMDTimeScale timeScale;
-        this->Internal->MWCaptureDisplayMode->GetFrameRate(&frameDuration, &timeScale);
         vtkPlusDataSource* source;
         this->GetFirstVideoSource(source);
         source->SetInputFrameSize(this->Internal->RequestedFrameSize);
@@ -436,31 +393,11 @@ PlusStatus vtkPlusMWCaptureVideoSource::InternalConnect()
             this->Internal->GrayBytes = (unsigned char*)malloc(this->Internal->RequestedFrameSize[0] * this->Internal->RequestedFrameSize[1] * 1 * sizeof(unsigned char));
         }
 
-        this->Internal->MWCaptureInput->SetCallback(this);
-        this->Internal->MWCaptureInput->SetScreenPreviewCallback(nullptr);
-        this->Internal->MWCaptureInput->DisableAudioInput();
 
-        HRESULT res = this->Internal->MWCaptureInput->EnableVideoInput(this->Internal->MWCaptureDisplayMode->GetDisplayMode(), this->Internal->RequestedPixelFormat, bmdVideoInputFlagDefault);
-        if (res != S_OK)
-        {
-            LPTSTR errorMsgPtr = 0;
-            FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, res, 0, (LPTSTR)&errorMsgPtr, 0, NULL);
-            LOG_ERROR("Unable to convert video frame: " << errorMsgPtr);
-            LocalFree(errorMsgPtr);
-            this->Internal->MWCaptureDisplayMode->Release();
-            this->Internal->MWCaptureDisplayMode = nullptr;
-            this->Internal->MWCaptureInput->Release();
-            this->Internal->MWCaptureInput = nullptr;
-            this->Internal->MWCapture->Release();
-            this->Internal->MWCapture = nullptr;
-            return PLUS_FAIL;
-        }
-
-        this->Internal->OutputFrame = new PlusOutputVideoFrame(this->Internal->MWCaptureDisplayMode->GetWidth(), this->Internal->MWCaptureDisplayMode->GetHeight(), bmdFormat8BitBGRA, bmdFrameFlagDefault);
+        return PLUS_SUCCESS;
     }
-
-    return this->Internal->MWCaptureInput == nullptr ? PLUS_FAIL : PLUS_SUCCESS;
 }
+
 
 //----------------------------------------------------------------------------
 PlusStatus vtkPlusMWCaptureVideoSource::InternalDisconnect()
@@ -470,36 +407,10 @@ PlusStatus vtkPlusMWCaptureVideoSource::InternalDisconnect()
     free(this->Internal->RGBBytes);
     free(this->Internal->GrayBytes);
 
-    this->Internal->MWCaptureVideoConversion->Release();
-    this->Internal->MWCaptureVideoConversion = nullptr;
-
-    if (this->Internal->OutputFrame != nullptr)
-    {
-        delete this->Internal->OutputFrame;
-        this->Internal->OutputFrame = nullptr;
-    }
+    delete this->Internal->MWInputSignalStatus;
+    this->Internal->MWInputSignalStatus = nullptr;
 
     this->StopRecording();
-    this->Internal->MWCaptureInput->SetScreenPreviewCallback(NULL);
-    this->Internal->MWCaptureInput->SetCallback(NULL);
-
-    if (this->Internal->MWCaptureDisplayMode != nullptr)
-    {
-        this->Internal->MWCaptureDisplayMode->Release();
-        this->Internal->MWCaptureDisplayMode = nullptr;
-    }
-    if (this->Internal->MWCaptureInput != nullptr)
-    {
-        this->Internal->MWCaptureInput->Release();
-        this->Internal->MWCaptureInput = nullptr;
-    }
-    if (this->Internal->MWCapture != nullptr)
-    {
-        this->Internal->MWCapture->Release();
-        this->Internal->MWCapture = nullptr;
-    }
-
-    ShutdownCOM(this->Internal->COMInitialized);
 
     return PLUS_FAIL;
 }
@@ -509,12 +420,21 @@ PlusStatus vtkPlusMWCaptureVideoSource::InternalStartRecording()
 {
     LOG_TRACE("vtkPlusMWCaptureVideoSource::InternalStartRecording");
 
-    if (this->Internal->MWCaptureInput != nullptr)
+    if (this->Internal->MWChannelHandle != nullptr)
     {
-        if (this->Internal->MWCaptureInput->StartStreams() != S_OK)
-        {
+        DWORD frameDuration = this->Internal->MWInputSignalStatus->dwFrameDuration;
+        HANDLE handle = MWCreateVideoCapture(this->Internal->MWChannelHandle, this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1],
+            this->Internal->RequestedPixelFormat, frameDuration, vtkPlusMWCaptureVideoSource::MWCaptureVideoCallback, this);
+        if (NULL == handle) {
+            LOG_ERROR("Unable to create video capture - channel index = " << this->Internal->MWChannelIndex);
+            delete this->Internal->MWInputSignalStatus;
+            this->Internal->MWInputSignalStatus = nullptr;
+            MWCloseChannel(this->Internal->MWChannelHandle);
+            this->Internal->MWChannelHandle = nullptr;
+            this->Internal->MWChannelIndex = -1;
             return PLUS_FAIL;
         }
+        this->Internal->MWVideoCaptureHandle = handle;
     }
     else
     {
@@ -529,15 +449,13 @@ PlusStatus vtkPlusMWCaptureVideoSource::InternalStopRecording()
 {
     LOG_TRACE("vtkPlusMWCaptureVideoSource::InternalStopRecording");
 
-    if (this->Internal->MWCaptureInput != nullptr)
+    if (this->Internal->MWVideoCaptureHandle != nullptr)
     {
-        if (this->Internal->MWCaptureInput->StopStreams() != S_OK)
-        {
+        if (MW_RESULT::MW_SUCCEEDED != MWDestoryVideoCapture(this->Internal->MWVideoCaptureHandle)) {
             return PLUS_FAIL;
         }
     }
-    else
-    {
+    else {
         return PLUS_FAIL;
     }
 
@@ -549,34 +467,22 @@ PlusStatus vtkPlusMWCaptureVideoSource::Probe()
 {
     LOG_TRACE("vtkPlusMWCaptureVideoSource::Probe");
 
-    bool comInit = this->Internal->COMInitialized;
-    if (!InitCOM(this->Internal->COMInitialized))
-    {
-        return PLUS_FAIL;
-    }
-
     // Do stuff
-    IDeckLinkIterator* deckLinkIterator = DeckLinkAPIWrapper::CreateDeckLinkIterator();
-    IDeckLink* deckLink(nullptr);
-
-    if (deckLinkIterator == nullptr)
-    {
+    bool rt = MWCaptureInitInstance();
+    if (!rt) {
         return PLUS_FAIL;
     }
 
-    // Does this system contain any MWCapture device?
-    bool result(false);
-    if (deckLinkIterator->Next(&deckLink) == S_OK)
-    {
-        result = true;
+    if (MW_RESULT::MW_SUCCEEDED != MWRefreshDevice()) {
+        return PLUS_FAIL;
     }
 
-    if (!comInit)
-    {
-        ShutdownCOM(this->Internal->COMInitialized);
+    int channelCount = MWGetChannelCount();
+    if (channelCount == 0) {
+        return PLUS_FAIL;
     }
 
-    return result ? PLUS_SUCCESS : PLUS_FAIL;
+    return PLUS_SUCCESS;
 }
 
 //----------------------------------------------------------------------------
@@ -597,79 +503,44 @@ PlusStatus vtkPlusMWCaptureVideoSource::NotifyConfigured()
     return PLUS_SUCCESS;
 }
 
+
 //----------------------------------------------------------------------------
-HRESULT STDMETHODCALLTYPE vtkPlusMWCaptureVideoSource::VideoInputFormatChanged(BMDVideoInputFormatChangedEvents notificationEvents, IDeckLinkDisplayMode* newDisplayMode, BMDDetectedVideoInputFormatFlags detectedSignalFlags)
-{
-    return S_OK;
+
+void vtkPlusMWCaptureVideoSource::MWCaptureVideoCallback(BYTE* p_buffer, int frame_len, UINT64 ts, void* p_param) {
+    vtkPlusMWCaptureVideoSource* thisClass = (vtkPlusMWCaptureVideoSource*)p_param;
+    if (thisClass)
+        thisClass->VideoInputFrameArrived(p_buffer, frame_len, ts);
 }
 
-//----------------------------------------------------------------------------
-HRESULT STDMETHODCALLTYPE vtkPlusMWCaptureVideoSource::VideoInputFrameArrived(IDeckLinkVideoInputFrame* videoFrame, IDeckLinkAudioInputPacket* audioPacket)
+void STDMETHODCALLTYPE vtkPlusMWCaptureVideoSource::VideoInputFrameArrived(BYTE* p_buffer, int frame_len, int ts)
 {
-    if (!this->IsRecording())
-    {
-        return S_OK;
+    if (!this->IsRecording()) {
+        return;
     }
 
-    if (videoFrame)
+    vtkPlusDataSource* source;
+    this->GetFirstVideoSource(source);
+
+    if (source->GetImageType() == US_IMG_RGB_COLOR)
     {
-        this->Internal->OutputFrame->SetFlags(videoFrame->GetFlags());
-
-        bool inputFrameValid = ((videoFrame->GetFlags() & bmdFrameHasNoInputSource) == 0);
-
-        if (inputFrameValid && !this->Internal->PreviousFrameValid)
-        {
-            this->Internal->MWCaptureInput->StopStreams();
-            this->Internal->MWCaptureInput->FlushStreams();
-            this->Internal->MWCaptureInput->StartStreams();
-        }
-
-        if (inputFrameValid)
-        {
-            HRESULT res = this->Internal->MWCaptureVideoConversion->ConvertFrame(videoFrame, this->Internal->OutputFrame);
-            if (res != S_OK)
-            {
-                LPTSTR errorMsgPtr = 0;
-                FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, res, 0, (LPTSTR)&errorMsgPtr, 0, NULL);
-                LOG_ERROR("Unable to convert video frame: " << errorMsgPtr);
-                LocalFree(errorMsgPtr);
-            }
-
-            if (this->Internal->PreviousFrameValid && res == S_OK)
-            {
-                void* buffer;
-                if (this->Internal->OutputFrame->GetBytes(&buffer) == S_OK)
-                {
-                    vtkPlusDataSource* source;
-                    this->GetFirstVideoSource(source);
-
-                    if (source->GetImageType() == US_IMG_RGB_COLOR)
-                    {
-                        // Flip BGRA to RGB
-                        PixelCodec::BGRA32ToRGB24(this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1], (unsigned char*)buffer, this->Internal->RGBBytes);
-                    }
-                    else
-                    {
-                        PixelCodec::RGBA32ToGray(this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1], (unsigned char*)buffer, this->Internal->GrayBytes);
-                    }
-
-                    if (source->AddItem(source->GetImageType() == US_IMG_RGB_COLOR ? this->Internal->RGBBytes : this->Internal->GrayBytes,
-                        source->GetInputImageOrientation(),
-                        this->Internal->RequestedFrameSize,
-                        VTK_UNSIGNED_CHAR, source->GetNumberOfScalarComponents(),
-                        source->GetImageType(),
-                        0,
-                        this->FrameNumber) != PLUS_SUCCESS)
-                    {
-                        LOG_ERROR("Unable to add video item to buffer.");
-                        return PLUS_FAIL;
-                    }
-                    this->FrameNumber++;
-                }
-            }
-        }
-
-        this->Internal->PreviousFrameValid = inputFrameValid;
+        // Flip BGRA to RGB
+        PixelCodec::BGRA32ToRGB24(this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1], p_buffer, this->Internal->RGBBytes);
     }
-    return S_OK;
+    else
+    {
+        PixelCodec::RGBA32ToGray(this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1], p_buffer, this->Internal->GrayBytes);
+    }
+
+    if (source->AddItem(source->GetImageType() == US_IMG_RGB_COLOR ? this->Internal->RGBBytes : this->Internal->GrayBytes,
+        source->GetInputImageOrientation(),
+        this->Internal->RequestedFrameSize,
+        VTK_UNSIGNED_CHAR, source->GetNumberOfScalarComponents(),
+        source->GetImageType(),
+        0,
+        this->FrameNumber) != PLUS_SUCCESS)
+    {
+        LOG_ERROR("Unable to add video item to buffer.");
+        return;
+    }
+    this->FrameNumber++;
 }

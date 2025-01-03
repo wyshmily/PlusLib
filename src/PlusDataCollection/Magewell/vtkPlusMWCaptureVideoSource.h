@@ -15,17 +15,16 @@ See License.txt for details.
   // Windows includes
 #include <comutil.h>
 #endif
-#include <DeckLinkAPI.h>
 
 // STL includes
 #include <atomic>
 
 /*!
 \class vtkPlusMWCaptureVideoSource
-\brief Interface to a BlackMagic MWCapture capture card
+\brief Interface to a Magewell capture card
 \ingroup PlusLibDataCollection
 */
-class vtkPlusDataCollectionExport vtkPlusMWCaptureVideoSource : public vtkPlusDevice, public IDeckLinkInputCallback
+class vtkPlusDataCollectionExport vtkPlusMWCaptureVideoSource : public vtkPlusDevice
 {
 public:
     static vtkPlusMWCaptureVideoSource* New();
@@ -48,16 +47,16 @@ public:
 protected:
     vtkPlusMWCaptureVideoSource();
     ~vtkPlusMWCaptureVideoSource();
-
+    
 protected:
-    // IMWCaptureInputCallback interface
-    virtual HRESULT STDMETHODCALLTYPE VideoInputFormatChanged(BMDVideoInputFormatChangedEvents notificationEvents, IDeckLinkDisplayMode* newDisplayMode, BMDDetectedVideoInputFormatFlags detectedSignalFlags);
-    virtual HRESULT STDMETHODCALLTYPE VideoInputFrameArrived(IDeckLinkVideoInputFrame* videoFrame, IDeckLinkAudioInputPacket* audioPacket);
-
     // IUnknown interface
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, LPVOID* ppv);
     virtual ULONG STDMETHODCALLTYPE AddRef();
     virtual ULONG STDMETHODCALLTYPE Release();
+
+private:
+    static void MWCaptureVideoCallback(BYTE* p_buffer, int frame_len, UINT64 ts, void* p_param);
+    void VideoInputFrameArrived(BYTE* p_buffer, int frame_len, int ts);
 
 protected:
     std::atomic<ULONG> ReferenceCount;

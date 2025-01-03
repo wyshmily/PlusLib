@@ -626,14 +626,12 @@ IF(PLUS_USE_MAGEWELL_MWCAPTURE)
   FIND_PACKAGE(MWCapture REQUIRED)
   SET(MagewellMWCapture_HDRS
     Magewell/vtkPlusMWCaptureVideoSource.h
-    Magewell/DeckLinkAPIWrapper.h
-    Magewell/PlusOutputVideoFrame.h
+    Magewell/MWCaptureAPIWrapper.h
   )
 
   SET(MagewellMWCapture_SRCS
     Magewell/vtkPlusMWCaptureVideoSource.cxx
-    Magewell/DeckLinkAPIWrapper.cxx
-    Magewell/PlusOutputVideoFrame.cxx
+    Magewell/MWCaptureAPIWrapper.cxx
     )
 
   IF(UNIX)
