@@ -150,6 +150,10 @@ See License.txt for details.
 #include "BlackMagic/vtkPlusDeckLinkVideoSource.h"
 #endif
 
+#ifdef PLUS_USE_MAGEWELL_MWCAPTURE
+#include "Magewell/vtkPlusMWCaptureVideoSource.h"
+#endif
+
 #ifdef PLUS_USE_THORLABS_VIDEO
 #include "ThorLabs\vtkPlusThorLabsVideoSource.h"
 #endif
@@ -365,6 +369,9 @@ vtkPlusDeviceFactory::vtkPlusDeviceFactory()
 #endif
 #ifdef PLUS_USE_BLACKMAGIC_DECKLINK
     RegisterDevice("DeckLinkVideo", "vtkPlusDeckLinkVideoSource", (PointerToDevice)&vtkPlusDeckLinkVideoSource::New);
+#endif
+#ifdef PLUS_USE_MAGEWELL_MWCAPTURE
+    RegisterDevice("MWCaptureVideo", "vtkPlusMWCaptureVideoSource", (PointerToDevice)&vtkPlusMWCaptureVideoSource::New);
 #endif
 #ifdef PLUS_USE_THORLABS_VIDEO
     RegisterDevice("ThorLabsVideo", "vtkPlusThorLabsVideoSource", (PointerToDevice)&vtkPlusThorLabsVideoSource::New);
