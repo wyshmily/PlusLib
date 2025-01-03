@@ -619,6 +619,7 @@ IF(PLUS_USE_BLACKMAGIC_DECKLINK)
     )
 ENDIF()
 
+message(STATUS "  MWCapture_Include_Dir: ${MWCapture_INCLUDE_DIR}")
 #--------------------------------------------------------------------------
 # Magewell MWCapture support
 IF(PLUS_USE_MAGEWELL_MWCAPTURE)
