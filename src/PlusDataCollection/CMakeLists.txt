@@ -53,6 +53,7 @@ OPTION(PLUS_USE_AGILENT "Provide support for the Agilent PCI digitizer." OFF)
 OPTION(PLUS_USE_OPTICAL_MARKER_TRACKER "Provide support of fiducial marker tracking. Requires PLUS_USE_OpenCV." OFF)
 OPTION(PLUS_USE_OPENHAPTICS "Provide support for OpenHaptics devices." OFF)
 OPTION(PLUS_USE_BLACKMAGIC_DECKLINK "Provide support for BlackMagic DeckLink capture cards." OFF)
+OPTION(PLUS_USE_MAGEWELL_MWCAPTURE "Provide support for Magewell capture cards." OFF)
 OPTION(PLUS_USE_INFRARED_SEEK_CAM "Provide support for capturing an Infrared Seek Cam" OFF)
 OPTION(PLUS_USE_ANDOR_CAMERA "Provide support for capturing images from Andor Camera. Requires PLUS_USE_OpenCV." OFF)
 OPTION(PLUS_USE_INFRARED_TEQ1_CAM "Provide support for capturing an Infrared Therma Expert Q1 Camera capture stream" OFF)
@@ -615,6 +616,42 @@ IF(PLUS_USE_BLACKMAGIC_DECKLINK)
 
   LIST(APPEND ${PROJECT_NAME}_LIBS
     DeckLinkSDK
+    )
+ENDIF()
+
+#--------------------------------------------------------------------------
+# Magewell MWCapture support
+IF(PLUS_USE_MAGEWELL_MWCAPTURE)
+  FIND_PACKAGE(MWCapture REQUIRED)
+  SET(MagewellMWCapture_HDRS
+    Magewell/vtkPlusMWCaptureVideoSource.h
+    Magewell/MWCatureAPIWrapper.h
+    Magewell/PlusOutputVideoFrame.h
+    #${MWCAPTRE_INCLUDE_DIR}/DeckLinkAPIVersion.h
+  )
+
+  SET(MagewellMWCapture_SRCS
+    Magewell/vtkPlusMWCaptureVideoSource.cxx
+    Magewell/MWCatureAPIWrapper.cxx
+    #Magewell/PlusOutputVideoFrame.cxx
+    )
+
+  IF(UNIX)
+    LIST(APPEND MagewellMWCapture_SRCS
+      ${MWCAPTRE_INCLUDE_DIR}/DeckLinkAPIDispatch.cpp
+      )
+  ENDIF()
+
+  LIST(APPEND ${PROJECT_NAME}_HDRS
+    ${MagewellMWCapture_HDRS}
+    )
+
+  LIST(APPEND ${PROJECT_NAME}_SRCS
+    ${MagewellMWCapture_SRCS}
+    )
+
+  LIST(APPEND ${PROJECT_NAME}_LIBS
+    MWCapture
     )
 ENDIF()
 
@@ -2772,6 +2809,12 @@ IF(PLUS_USE_BLACKMAGIC_DECKLINK)
   LIST(APPEND BlackMagicDeckLink_SRCS ${MIDL_OUTPUT})
 ENDIF()
 
+IF(PLUS_USE_MAGEWELL_MWCAPTURE)
+  #MWCaptureGenerateAPIFiles(vtk${PROJECT_NAME})
+  target_sources(vtk${PROJECT_NAME} PRIVATE ${MIDL_OUTPUT})
+  LIST(APPEND MagewellMWCapture_SRCS ${MIDL_OUTPUT})
+ENDIF()
+
 # --------------------------------------------------------------------------
 # Source groups
 source_group("NVidiaDVP" FILES ${NVidiaDVP_HDRS} ${NVidiaDVP_SRCS})
@@ -2826,6 +2869,7 @@ source_group("LeapMotion" FILES ${LeapMotion_HDRS} ${LeapMotion_SRCS})
 source_group("ClariusVideo" FILES ${CLARIUS_HDRS} ${CLARIUS_SRCS})
 source_group("ClariusOEM" FILES ${CLARIUS_OEM_HDRS} ${CLARIUS_OEM_SRCS})
 source_group("BlackMagic" FILES ${BlackMagicDeckLink_HDRS} ${BlackMagicDeckLink_SRCS})
+source_group("Magewell" FILES ${MagewellMWCapture_HDRS} ${MagewellMWCapture_SRCS})
 source_group("SteamVR" FILES ${STEAMVR_HDRS} ${STEAMVR_SRCS})
 
 # --------------------------------------------------------------------------
