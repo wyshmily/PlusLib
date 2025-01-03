@@ -2810,7 +2810,10 @@ ENDIF()
 IF(PLUS_USE_MAGEWELL_MWCAPTURE)
   #MWCaptureGenerateAPIFiles(vtk${PROJECT_NAME})
   target_sources(vtk${PROJECT_NAME} PRIVATE ${MIDL_OUTPUT})
+  # target_link_libraries(vtk${PROJECT_NAME} PRIVATE MWCapture)
   LIST(APPEND MagewellMWCapture_SRCS ${MIDL_OUTPUT})
+  LIST(APPEND External_Libraries_Install  ${MWCapture_LIBRARY_RELEASE})
+  LIST(APPEND External_Libraries_Debug  ${MWCapture_LIBRARY_DEBUG})
 ENDIF()
 
 # --------------------------------------------------------------------------
