@@ -232,6 +232,13 @@ PlusStatus vtkPlusMWCaptureVideoSource::ReadConfiguration(vtkXMLDataElement* roo
         this->Internal->DeviceName = devName;
     }
 
+    std::string devFamily("");
+    XML_READ_STRING_ATTRIBUTE_NONMEMBER_OPTIONAL(DeviceFamily, devFamily, deviceConfig);
+    if (!devName.empty())
+    {
+        this->Internal->RequestedDeviceFamily = devFamily;
+    }
+
     int size[3] = { -1, -1, -1 };
     XML_READ_VECTOR_ATTRIBUTE_NONMEMBER_OPTIONAL(int, 2, FrameSize, size, deviceConfig);
     if (size[0] != -1 && size[1] != -1)
@@ -245,11 +252,10 @@ PlusStatus vtkPlusMWCaptureVideoSource::ReadConfiguration(vtkXMLDataElement* roo
     XML_READ_STRING_ATTRIBUTE_NONMEMBER_OPTIONAL(PixelFormat, pixelFormat, deviceConfig);
     if (!pixelFormat.empty())
     {
-        //this->Internal->RequestedPixelFormat = DeckLinkAPIWrapper::PixelFormatFromString(pixelFormat);
         this->Internal->RequestedPixelFormat = DeckLinkAPIWrapper::PixelFormatFromString(pixelFormat);
-        if (this->Internal->RequestedPixelFormat == MWFOURCC_UNK)
+        if (this->Internal->RequestedPixelFormat != MWFOURCC_YUY2)
         {
-            LOG_ERROR("Unknown pixel format requested. Please see device page documentation for supported pixel formats.");
+            LOG_ERROR("Unsupported pixel format requested. Currently YUY2 is the only supported capture pixel format");
             return PLUS_FAIL;
         }
     }
@@ -318,7 +324,7 @@ PlusStatus vtkPlusMWCaptureVideoSource::InternalConnect()
                     goto out;
                 }
 
-                VIDEO_FORMAT_INFO* p_format = (VIDEO_FORMAT_INFO*)malloc(count * sizeof(VIDEO_FORMAT_INFO));
+                VIDEO_FORMAT_INFO* p_format = (VIDEO_FORMAT_INFO*)malloc(formatCount * sizeof(VIDEO_FORMAT_INFO));
 
                 if (!MWGetVideoCaptureSupportFormat(channelHandle, p_format, &formatCount)) {
                     if (p_format) {
@@ -352,7 +358,7 @@ PlusStatus vtkPlusMWCaptureVideoSource::InternalConnect()
                             break;
                         }
 
-                        if (signalStatus->state == MWCAP_VIDEO_SIGNAL_LOCKED) {
+                        if (signalStatus->state == MWCAP_VIDEO_SIGNAL_LOCKED || signalStatus->state == MWCAP_VIDEO_SIGNAL_NONE) {
                             this->Internal->MWChannelIndex = channelIndex;
                             this->Internal->MWChannelHandle = channelHandle;
                             this->Internal->MWInputSignalStatus = signalStatus;
@@ -396,6 +402,8 @@ PlusStatus vtkPlusMWCaptureVideoSource::InternalConnect()
 
         return PLUS_SUCCESS;
     }
+
+    return PLUS_FAIL;
 }
 
 
@@ -521,14 +529,15 @@ void STDMETHODCALLTYPE vtkPlusMWCaptureVideoSource::VideoInputFrameArrived(BYTE*
     vtkPlusDataSource* source;
     this->GetFirstVideoSource(source);
 
+
     if (source->GetImageType() == US_IMG_RGB_COLOR)
     {
         // Flip BGRA to RGB
-        PixelCodec::BGRA32ToRGB24(this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1], p_buffer, this->Internal->RGBBytes);
+        PixelCodec::YUV422pToRGB24(PixelCodec::ComponentOrder_RGB, this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1], p_buffer, this->Internal->RGBBytes);
     }
     else
     {
-        PixelCodec::RGBA32ToGray(this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1], p_buffer, this->Internal->GrayBytes);
+        PixelCodec::YUV422pToGray(this->Internal->RequestedFrameSize[0], this->Internal->RequestedFrameSize[1], p_buffer, this->Internal->GrayBytes);
     }
 
     if (source->AddItem(source->GetImageType() == US_IMG_RGB_COLOR ? this->Internal->RGBBytes : this->Internal->GrayBytes,
